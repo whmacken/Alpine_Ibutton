@@ -1,0 +1,106 @@
+---
+title: "Alpine_Ibutton_Veg_analysis"
+author: "Will MacKenzie"
+date: "2023-11-12"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+require(data.table)
+require(tidyverse)
+require(dplyr)
+require(data.tree)
+require(DBI) #loads odbc as well
+require(labdsv)
+require(factoextra)
+require(CooccurrenceAffinity)
+require(dendextend)
+require(ggdendro)
+```
+
+## Import data matrix
+
+```{r import species master}
+sppmaster <- dbConnect(odbc::odbc(), .connection_string = "Driver={Microsoft Access Driver (*.mdb, *.accdb)}; DBQ=F:/OneDrive - Government of BC/BCSpeciesList/SpeciesTaxonomyMaster.accdb;")
+taxon.all  <- dbReadTable(sppmaster, "USysAllSpecs")
+dbDisconnect(sppmaster)
+```
+
+## Import veg data
+
+```{r pressure, echo=FALSE}
+veg.data <- fread("./data/ibutton_veg.csv") %>% pivot_longer(-plot_id, names_to = "species", values_to = "cover") %>% dplyr::filter(!cover == 0) %>% as.data.frame
+plots = c("BH04", "CA05", "BT04")## Carex nigricans
+plots = c("BL10", "AS03", "PP07")## Cass mer
+plots = c("CA01", "PP04", "CH13")## Dryas oct
+xx <- veg.data %>% filter(plot_id %in% plots)
+veg.dat <- labdsv::matrify(veg.data)
+
+```
+```{r import environment data}
+env.data <- fread("./data/ibutton_env_reduced.csv") 
+```
+
+
+
+```{r pressure, echo=FALSE}
+### how well does the data cluster?
+mnt_clst <- agnes(veg.dat, method = "ward", metric = "jaccard") ### figure out how to keep names with agnes function
+mnt_clst$ac ## the higher the value the more it clusters
+
+veg.dist <- proxy::dist(veg.dat, method="eJaccard", diag=FALSE, upper = FALSE, pairwise = FALSE)
+
+library(cluster)
+require(ape)
+n_clust <- fviz_nbclust(veg.dat, FUNcluster = hcut, nstart = 25, method = "gap_stat", nboot = 50)#+
+#geom_vline(xintercept = 6, linetype = 2)
+#  labs(subtitle = "Gap statistic method")
+plot(n_clust) ## "optimal" cluster number
+
+mnt_clst2 <- cutree (mnt_clst, best.clust)
+mnt_clst.orig <- as.hclust(mnt_clst)
+mnt_clst.info <- mnt_clst.orig[c(3,4)] %>% as.data.frame %>% cbind(mnt_clst2) %>% rename(cluster = mnt_clst2) %>% mutate(cluster = as.factor(cluster))
+n_clust<-n_clust$data
+best.clust<-as.numeric(n_clust$clusters[which.max(n_clust$ymax)])
+
+veg.clst <- hclust(veg.dist,method="ward.D")
+veg.clst2 <- cutree (veg.clst, best.clust)
+veg.clst <- as.hclust(veg.clst)
+
+
+plot(veg.clst, hang = -1, cex = .6)
+rect.hclust(veg.clst , k = best.clust, border = 2:6)
+#abline(h = veg.clst, col = 'red')
+# 
+# plot(as.phylo(veg.clst), cex = 0.3, label.offset = 0.1)
+# ggdendrogram(veg.clst, rotate = FALSE, theme_dendro = TRUE, size = .5)
+
+fviz_dend(veg.clst, cex = 0.5, lwd = 0.5,  k=10, #h = .25,
+          rect = TRUE, 
+          k_colors = "jco", 
+          rect_border = "jco", 
+          rect_fill = TRUE,
+          ggtheme = theme_gray(),labels=F,
+          horiz = TRUE,
+          type = "phylogenic",
+          repel = TRUE,
+          phylo_layout = "layout_as_tree")
+```
+
+
+```{r NMDS, echo=FALSE}
+require(vegan)
+sol<- metaMDS(veg.dat,distance = "jaccard", k = 2, trymax = 50)
+ord <- ordiplot(sol, choices = c(1,2))
+type <- sites.long(ord, env.dat = veg.site)
+plot.new()
+ord<-ordiellipse(sol, labels ,display = "sites", kind ="sd", conf = 0.95, label = T)
+dev.off()
+
+dist <- dsvdis(veg.dat, index = "bray/curtis")
+nmds <- nmds(dist)
+plot(nmds, ids = TRUE)
+
+```
+
+Note that the `echo = FALSE` parameter was added to the code chunk to prevent printing of the R code that generated the plot.
